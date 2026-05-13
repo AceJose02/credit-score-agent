@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Credit Score AI Agent</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary: #ffffff;
+      --bg-secondary: #f5f5f2;
+      --bg-tertiary: #ebebeb;
+      --text-primary: #1a1a1a;
+      --text-secondary: #6b6b68;
+      --text-tertiary: #a0a09c;
+      --border: rgba(0,0,0,0.12);
+      --border-strong: rgba(0,0,0,0.22);
+      --radius-md: 8px;
+      --radius-lg: 12px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-primary: #1e1e1c;
+        --bg-secondary: #2a2a28;
+        --bg-tertiary: #333330;
+        --text-primary: #f0ede8;
+        --text-secondary: #9e9b95;
+        --text-tertiary: #6a6864;
+        --border: rgba(255,255,255,0.10);
+        --border-strong: rgba(255,255,255,0.20);
+      }
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    .container { max-width: 780px; margin: 0 auto; }
+
+    h1 { font-size: 22px; font-weight: 500; margin-bottom: 4px; }
+    .subtitle { font-size: 14px; color: var(--text-secondary); margin-bottom: 2rem; }
+
+    .section-label {
+      font-size: 11px; font-weight: 500; color: var(--text-secondary);
+      text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px;
+    }
+
+    /* Provider toggle */
+    .provider-tabs { display: flex; gap: 6px; margin-bottom: 1.5rem; }
+    .provider-tab {
+      display: flex; align-items: center; gap: 7px;
+      padding: 7px 16px; border-radius: var(--radius-md);
+      border: 0.5px solid var(--border); background: var(--bg-primary);
+      cursor: pointer; font-size: 13px; font-weight: 500;
+      color: var(--text-secondary); font-family: inherit; transition: all 0.15s;
+    }
+    .provider-tab:hover { border-color: var(--border-strong); color: var(--text-primary); }
+    .provider-tab.active { border-color: transparent; color: #fff; }
+    .provider-tab.active.anthropic { background: #c17a2d; }
+    .provider-tab.active.openai    { background: #10a37f; }
+    .provider-tab.disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+    .provider-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .provider-tab.anthropic .provider-dot { background: #c17a2d; }
+    .provider-tab.openai    .provider-dot { background: #10a37f; }
+    .provider-tab.active    .provider-dot { background: rgba(255,255,255,0.7); }
+
+    /* Status banner */
+    .env-banner {
+      padding: 10px 14px; border-radius: var(--radius-md);
+      font-size: 13px; margin-bottom: 1.5rem;
+      display: none;
+    }
+    .env-banner.warn { background: #fff4e0; color: #7a4a00; border: 0.5px solid #f0c060; }
+    .env-banner.warn.dark-ok { background: #2e2500; color: #f0c060; }
+
+    /* Score display */
+    .score-display {
+      display: flex; align-items: center; gap: 1.5rem;
+      padding: 1.25rem; background: var(--bg-secondary);
+      border-radius: var(--radius-lg); margin-bottom: 1.5rem;
+    }
+    .score-ring { position: relative; width: 80px; height: 80px; flex-shrink: 0; }
+    .score-ring svg { transform: rotate(-90deg); }
+    .score-num {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      font-size: 20px; font-weight: 500; color: var(--text-primary);
+    }
+    .score-num span { font-size: 10px; font-weight: 400; color: var(--text-secondary); }
+    .score-meta { flex: 1; }
+    .score-tier { font-size: 16px; font-weight: 500; }
+    .score-range { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+
+    /* Score inputs */
+    .score-input-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 1.5rem; }
+    .score-input-card { background: var(--bg-secondary); border-radius: var(--radius-lg); padding: 14px 16px; }
+    .score-input-card label { font-size: 11px; color: var(--text-secondary); display: block; margin-bottom: 6px; }
+    .score-input-card input {
+      font-size: 22px; font-weight: 500; background: transparent;
+      border: none; outline: none; color: var(--text-primary); width: 100%; font-family: inherit;
+    }
+
+    /* Cards */
+    .cards-grid { display: grid; gap: 10px; margin-bottom: 1rem; }
+    .card-row {
+      background: var(--bg-primary); border: 0.5px solid var(--border);
+      border-radius: var(--radius-lg); padding: 14px 16px;
+    }
+    .card-row-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .card-name-input {
+      font-size: 14px; font-weight: 500; background: transparent;
+      border: none; outline: none; color: var(--text-primary); width: 200px; font-family: inherit;
+    }
+    .card-name-input::placeholder { color: var(--text-tertiary); }
+    .remove-btn {
+      font-size: 20px; line-height: 1; background: none; border: none;
+      cursor: pointer; color: var(--text-secondary); padding: 0 4px;
+    }
+    .remove-btn:hover { color: #E24B4A; }
+    .card-fields { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; }
+    @media (max-width: 600px) { .card-fields { grid-template-columns: 1fr 1fr; } }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font-size: 11px; color: var(--text-secondary); }
+    .field input {
+      font-size: 14px; padding: 7px 10px; border: 0.5px solid var(--border);
+      border-radius: var(--radius-md); background: var(--bg-secondary);
+      color: var(--text-primary); width: 100%; font-family: inherit; outline: none;
+    }
+    .field input:focus { border-color: var(--border-strong); }
+    .util-bar { height: 4px; border-radius: 2px; margin-top: 4px; background: var(--border); }
+    .util-fill { height: 100%; border-radius: 2px; transition: width 0.3s, background 0.3s; }
+
+    .add-card-btn {
+      width: 100%; padding: 11px;
+      border: 0.5px dashed var(--border-strong); border-radius: var(--radius-lg);
+      background: none; cursor: pointer; font-size: 14px; color: var(--text-secondary);
+      margin-bottom: 1.5rem; font-family: inherit; transition: background 0.15s;
+    }
+    .add-card-btn:hover { background: var(--bg-secondary); }
+
+    /* Factors */
+    .factors-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 1.5rem; }
+    .factor-card { background: var(--bg-secondary); border-radius: var(--radius-md); padding: 12px 14px; }
+    .factor-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 6px; }
+    .factor-bar { height: 6px; background: var(--border); border-radius: 3px; margin-bottom: 6px; }
+    .factor-fill { height: 100%; border-radius: 3px; transition: width 0.5s, background 0.3s; }
+    .factor-val { font-size: 13px; font-weight: 500; }
+
+    /* Analyze button */
+    .analyze-btn {
+      width: 100%; padding: 13px; background: var(--text-primary); color: var(--bg-primary);
+      border: none; border-radius: var(--radius-lg); font-size: 15px; font-weight: 500;
+      cursor: pointer; margin-bottom: 1.5rem; font-family: inherit; transition: opacity 0.2s;
+    }
+    .analyze-btn:hover { opacity: 0.85; }
+    .analyze-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Advice box */
+    .advice-box {
+      background: var(--bg-primary); border: 0.5px solid var(--border);
+      border-radius: var(--radius-lg); padding: 1.25rem; min-height: 80px; margin-bottom: 2rem;
+    }
+    .advice-placeholder { color: var(--text-tertiary); font-size: 14px; }
+    .advice-content { font-size: 14px; line-height: 1.75; color: var(--text-primary); }
+    .advice-content strong { font-weight: 500; }
+
+    .typing { display: flex; align-items: center; gap: 4px; padding: 4px 0; }
+    .typing-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-secondary); animation: blink 1s infinite; }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes blink { 0%,80%,100%{opacity:0.2} 40%{opacity:1} }
+
+    @media (max-width: 480px) {
+      .score-input-row { grid-template-columns: 1fr; }
+      .factors-grid    { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Credit Score AI Agent</h1>
+  <p class="subtitle">Enter your credit profile and get a personalized plan to improve your score.</p>
+
+  <!-- Provider toggle -->
+  <div class="section-label">ai provider</div>
+  <div class="provider-tabs">
+    <button class="provider-tab anthropic active" id="tabAnthropic" onclick="switchProvider('anthropic')">
+      <span class="provider-dot"></span> Anthropic (Claude)
+    </button>
+    <button class="provider-tab openai" id="tabOpenAI" onclick="switchProvider('openai')">
+      <span class="provider-dot"></span> OpenAI (GPT-4o)
+    </button>
+  </div>
+
+  <!-- Warning if a provider key is missing -->
+  <div class="env-banner warn" id="envBanner"></div>
+
+  <!-- Score ring -->
+  <div class="section-label">current score</div>
+  <div class="score-display">
+    <div class="score-ring">
+      <svg width="80" height="80" viewBox="0 0 80 80">
+        <circle cx="40" cy="40" r="34" fill="none" stroke="var(--border)" stroke-width="6"/>
+        <circle id="scoreArc" cx="40" cy="40" r="34" fill="none" stroke="#1D9E75" stroke-width="6"
+          stroke-dasharray="213.6" stroke-dashoffset="213.6" stroke-linecap="round"
+          style="transition:stroke-dashoffset 0.8s ease,stroke 0.5s"/>
+      </svg>
+      <div class="score-num" id="scoreNum">—<span>score</span></div>
+    </div>
+    <div class="score-meta">
+      <div class="score-tier" id="scoreTier">Enter your score below</div>
+      <div class="score-range">FICO range: 300–850</div>
+    </div>
+  </div>
+
+  <!-- Score inputs -->
+  <div class="score-input-row">
+    <div class="score-input-card">
+      <label>current credit score</label>
+      <input type="number" id="currentScore" placeholder="e.g. 680" min="300" max="850" oninput="updateScoreDisplay()">
+    </div>
+    <div class="score-input-card">
+      <label>goal score</label>
+      <input type="number" id="goalScore" placeholder="e.g. 750" min="300" max="850">
+    </div>
+  </div>
+
+  <!-- Credit cards -->
+  <div class="section-label">credit cards</div>
+  <div class="cards-grid" id="cardsGrid"></div>
+  <button class="add-card-btn" onclick="addCard()">+ add credit card</button>
+
+  <!-- Factors -->
+  <div class="section-label">credit factors</div>
+  <div class="factors-grid">
+    <div class="factor-card">
+      <div class="factor-label">overall utilization</div>
+      <div class="factor-bar"><div class="factor-fill" id="utilFill" style="width:0%;background:#1D9E75"></div></div>
+      <div class="factor-val" id="utilVal">—</div>
+    </div>
+    <div class="factor-card">
+      <div class="factor-label">average card age</div>
+      <div class="factor-bar"><div class="factor-fill" id="ageFill" style="width:0%;background:#378ADD"></div></div>
+      <div class="factor-val" id="ageVal">—</div>
+    </div>
+    <div class="factor-card">
+      <div class="factor-label">number of accounts</div>
+      <div class="factor-bar"><div class="factor-fill" id="acctFill" style="width:0%;background:#7F77DD"></div></div>
+      <div class="factor-val" id="acctVal">—</div>
+    </div>
+    <div class="factor-card">
+      <div class="factor-label">highest utilization card</div>
+      <div class="factor-bar"><div class="factor-fill" id="highFill" style="width:0%;background:#E24B4A"></div></div>
+      <div class="factor-val" id="highVal">—</div>
+    </div>
+  </div>
+
+  <!-- Analyze -->
+  <button class="analyze-btn" id="analyzeBtn" onclick="analyze()">Analyze my credit & get advice →</button>
+
+  <!-- Advice -->
+  <div class="section-label">ai advisor</div>
+  <div class="advice-box" id="adviceBox">
+    <div class="advice-placeholder">Your personalized credit improvement plan will appear here after analysis.</div>
+  </div>
+</div>
+
+<script>
+  let cards = [];
+  let cardIdCounter = 0;
+  let currentProvider = 'anthropic';
+  let providerStatus = { anthropic: false, openai: false };
+
+  // ── On load: ask server which providers are configured ──────
+  async function loadProviderStatus() {
+    try {
+      const res = await fetch('/api/status');
+      providerStatus = await res.json();
+    } catch {
+      // server not reachable — will surface on analyze
+    }
+    applyProviderStatus();
+  }
+
+  function applyProviderStatus() {
+    const tabA = document.getElementById('tabAnthropic');
+    const tabO = document.getElementById('tabOpenAI');
+
+    if (!providerStatus.anthropic) tabA.classList.add('disabled');
+    else tabA.classList.remove('disabled');
+
+    if (!providerStatus.openai) tabO.classList.add('disabled');
+    else tabO.classList.remove('disabled');
+
+    // Auto-select first available provider
+    if (!providerStatus[currentProvider]) {
+      const fallback = providerStatus.openai ? 'openai' : providerStatus.anthropic ? 'anthropic' : currentProvider;
+      switchProvider(fallback, true);
+    }
+
+    updateBanner();
+  }
+
+  function updateBanner() {
+    const banner = document.getElementById('envBanner');
+    const missing = !providerStatus[currentProvider];
+    if (missing) {
+      const name = currentProvider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY';
+      banner.textContent = `⚠ ${name} is not set in your .env file. Add it and restart the server.`;
+      banner.style.display = 'block';
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+
+  function switchProvider(provider, silent = false) {
+    currentProvider = provider;
+    document.getElementById('tabAnthropic').classList.toggle('active', provider === 'anthropic');
+    document.getElementById('tabOpenAI').classList.toggle('active', provider === 'openai');
+    if (!silent) updateBanner();
+  }
+
+  // ── Cards ───────────────────────────────────────────────────
+  function addCard(name='', limit='', balance='', ageYears='', ageMonths='') {
+    const id = cardIdCounter++;
+    cards.push({ id, name, limit, balance, ageYears, ageMonths });
+    renderCards();
+    updateFactors();
+  }
+
+  function removeCard(id) {
+    cards = cards.filter(c => c.id !== id);
+    renderCards();
+    updateFactors();
+  }
+
+  function updateCard(id, field, value) {
+    const card = cards.find(c => c.id === id);
+    if (card) card[field] = value;
+    updateFactors();
+    const bar = document.getElementById('utilFill_' + id);
+    if (bar) {
+      const c = cards.find(c => c.id === id);
+      if (c && c.limit && c.balance) {
+        const u = Math.min(100, Math.round(parseFloat(c.balance) / parseFloat(c.limit) * 100));
+        bar.style.width = u + '%';
+        bar.style.background = u >= 70 ? '#E24B4A' : u >= 30 ? '#BA7517' : '#1D9E75';
+      }
+    }
+  }
+
+  function escapeAttr(v) { return String(v || '').replace(/"/g, '&quot;'); }
+
+  function renderCards() {
+    const grid = document.getElementById('cardsGrid');
+    grid.innerHTML = '';
+    cards.forEach(card => {
+      const util = card.limit && card.balance
+        ? Math.min(100, Math.round(parseFloat(card.balance) / parseFloat(card.limit) * 100)) : 0;
+      const utilColor = util >= 70 ? '#E24B4A' : util >= 30 ? '#BA7517' : '#1D9E75';
+      const div = document.createElement('div');
+      div.className = 'card-row';
+      div.innerHTML = `
+        <div class="card-row-header">
+          <input class="card-name-input" type="text" placeholder="Card name (e.g. Chase Sapphire)"
+            value="${escapeAttr(card.name)}" oninput="updateCard(${card.id},'name',this.value)">
+          <button class="remove-btn" onclick="removeCard(${card.id})">×</button>
+        </div>
+        <div class="card-fields">
+          <div class="field">
+            <label>credit limit ($)</label>
+            <input type="number" placeholder="5000" value="${escapeAttr(card.limit)}"
+              oninput="updateCard(${card.id},'limit',this.value)">
+          </div>
+          <div class="field">
+            <label>current balance ($)</label>
+            <input type="number" placeholder="1200" value="${escapeAttr(card.balance)}"
+              oninput="updateCard(${card.id},'balance',this.value)">
+            <div class="util-bar">
+              <div class="util-fill" id="utilFill_${card.id}" style="width:${util}%;background:${utilColor}"></div>
+            </div>
+          </div>
+          <div class="field">
+            <label>age — years</label>
+            <input type="number" placeholder="3" min="0" value="${escapeAttr(card.ageYears)}"
+              oninput="updateCard(${card.id},'ageYears',this.value)">
+          </div>
+          <div class="field">
+            <label>age — months</label>
+            <input type="number" placeholder="0" min="0" max="11" value="${escapeAttr(card.ageMonths)}"
+              oninput="updateCard(${card.id},'ageMonths',this.value)">
+          </div>
+        </div>`;
+      grid.appendChild(div);
+    });
+  }
+
+  // ── Factors ─────────────────────────────────────────────────
+  function updateFactors() {
+    const filled = cards.filter(c => c.limit && c.balance);
+    const totalLimit = filled.reduce((s,c) => s + parseFloat(c.limit||0), 0);
+    const totalBal   = filled.reduce((s,c) => s + parseFloat(c.balance||0), 0);
+    const util = totalLimit > 0 ? Math.round(totalBal/totalLimit*100) : null;
+
+    const agesInMonths = cards.filter(c => c.ageYears||c.ageMonths)
+      .map(c => parseFloat(c.ageYears||0)*12 + parseFloat(c.ageMonths||0));
+    const avgMonths = agesInMonths.length ? agesInMonths.reduce((s,a)=>s+a,0)/agesInMonths.length : null;
+
+    const highs = filled.map(c => Math.round(parseFloat(c.balance)/parseFloat(c.limit)*100));
+    const highUtil = highs.length ? Math.max(...highs) : null;
+
+    const set = (fId, vId, pct, label, color) => {
+      document.getElementById(fId).style.width = Math.min(pct,100)+'%';
+      document.getElementById(fId).style.background = color;
+      document.getElementById(vId).textContent = label;
+    };
+
+    util !== null
+      ? set('utilFill','utilVal', util, util+'%', util>=70?'#E24B4A':util>=30?'#BA7517':'#1D9E75')
+      : set('utilFill','utilVal', 0, '—', '#1D9E75');
+
+    if (avgMonths !== null) {
+      const y = Math.floor(avgMonths/12), m = Math.round(avgMonths%12);
+      const lbl = y>0&&m>0 ? `${y}y ${m}m` : y>0 ? `${y} yrs` : `${m} mo`;
+      set('ageFill','ageVal', avgMonths/(15*12)*100, lbl, '#378ADD');
+    } else set('ageFill','ageVal', 0, '—', '#378ADD');
+
+    set('acctFill','acctVal', cards.length/8*100,
+      cards.length>0 ? cards.length+(cards.length===1?' card':' cards') : '—', '#7F77DD');
+
+    highUtil !== null
+      ? set('highFill','highVal', highUtil, highUtil+'%', highUtil>=70?'#E24B4A':highUtil>=30?'#BA7517':'#1D9E75')
+      : set('highFill','highVal', 0, '—', '#E24B4A');
+  }
+
+  // ── Score ring ──────────────────────────────────────────────
+  function updateScoreDisplay() {
+    const score = parseInt(document.getElementById('currentScore').value);
+    if (!score || score<300 || score>850) return;
+    const arc = document.getElementById('scoreArc');
+    document.getElementById('scoreNum').innerHTML = score + '<span>score</span>';
+    arc.style.strokeDashoffset = 213.6 - (score-300)/550*213.6;
+    let tier, color;
+    if      (score>=800) { tier='Exceptional'; color='#1D9E75'; }
+    else if (score>=740) { tier='Very good';   color='#378ADD'; }
+    else if (score>=670) { tier='Good';        color='#639922'; }
+    else if (score>=580) { tier='Fair';        color='#BA7517'; }
+    else                 { tier='Poor';        color='#E24B4A'; }
+    arc.style.stroke = color;
+    document.getElementById('scoreTier').textContent = tier;
+  }
+
+  // ── Analyze ─────────────────────────────────────────────────
+  async function analyze() {
+    const score = document.getElementById('currentScore').value;
+    const goal  = document.getElementById('goalScore').value;
+    const btn   = document.getElementById('analyzeBtn');
+    const box   = document.getElementById('adviceBox');
+
+    if (!score) { box.innerHTML = '<div class="advice-placeholder">Please enter your current credit score.</div>'; return; }
+    if (cards.length === 0) { box.innerHTML = '<div class="advice-placeholder">Please add at least one credit card.</div>'; return; }
+
+    const cardSummaries = cards.map((c,i) => {
+      const name    = c.name || `Card ${i+1}`;
+      const limit   = c.limit   ? `$${c.limit} limit`   : 'unknown limit';
+      const balance = c.balance ? `$${c.balance} balance` : 'unknown balance';
+      const util    = c.limit && c.balance
+        ? Math.round(parseFloat(c.balance)/parseFloat(c.limit)*100)+'% utilization' : 'unknown utilization';
+      const y = parseFloat(c.ageYears||0), m = parseFloat(c.ageMonths||0);
+      const age = (y||m)
+        ? (y>0&&m>0 ? `${y} years ${m} months old` : y>0 ? `${y} years old` : `${m} months old`)
+        : 'unknown age';
+      return `- ${name}: ${limit}, ${balance}, ${util}, ${age}`;
+    }).join('\n');
+
+    const prompt = `You are a credit score expert and financial advisor. Analyze this person's credit profile and give them a detailed, personalized, actionable plan to improve their credit score.
+
+Current credit score: ${score}${goal ? `\nGoal score: ${goal}` : ''}
+
+Credit cards:
+${cardSummaries}
+
+Please provide:
+1. A brief assessment of their current credit situation
+2. The top 3-5 specific, prioritized actions they should take to raise their score
+3. Timeline estimates for each action
+4. Any warnings about what NOT to do
+
+Be specific, practical, and encouraging. Use plain language. Format clearly with short paragraphs.`;
+
+    btn.disabled = true;
+    btn.textContent = 'Analyzing...';
+    box.innerHTML = '<div class="typing"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>';
+
+    try {
+      const endpoint = currentProvider === 'anthropic' ? '/api/analyze/anthropic' : '/api/analyze/openai';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Server error');
+
+      const formatted = data.text
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n\n/g, '</p><p style="margin-top:12px">')
+        .replace(/\n/g, '<br>');
+      box.innerHTML = `<div class="advice-content"><p>${formatted}</p></div>`;
+    } catch (err) {
+      box.innerHTML = `<div class="advice-placeholder">Error: ${err.message}</div>`;
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Analyze my credit & get advice →';
+  }
+
+  // Init
+  loadProviderStatus();
+  addCard('Chase Sapphire', '8000', '2100', '4', '6');
+  addCard('Capital One Quicksilver', '3500', '1800', '2', '3');
+</script>
+</body>
+</html>
