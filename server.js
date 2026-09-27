@@ -1,116 +1,133 @@
 // ─────────────────────────────────────────────────────────────
 //  Credit Score AI Agent — Server
-//  Reads API keys from .env and proxies requests to Anthropic
-//  or OpenAI so keys are never exposed in the browser.
+//
+//  Reads API keys from .env, validates the credit profile the
+//  browser sends, and streams a plan back from Anthropic
+//  (Messages API) or OpenAI (Responses API). Keys never reach
+//  the browser.
 // ─────────────────────────────────────────────────────────────
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
+const path    = require('node:path');
 const express = require('express');
-const cors    = require('cors');
-const fetch   = require('node-fetch');
-const path    = require('path');
+
+const { validateProfile, validateChat, buildPrompt, buildChatSystem, ProfileError, SYSTEM_PROMPT } = require('./lib/profile');
+const { CATALOG, adapters, isConfigured, findModel, describeProviders, explainError } = require('./lib/providers');
 
 const app  = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
+// Localhost only by default, so other devices on your network
+// can't spend your API credits. Set HOST=0.0.0.0 to share on purpose.
+const HOST = process.env.HOST || '127.0.0.1';
 
-app.use(cors());
-app.use(express.json());
-
-// Serve the frontend from /public
+app.disable('x-powered-by');
+app.use(express.json({ limit: '32kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ── Health / provider-status endpoint ────────────────────────
-// The frontend calls this on load to know which providers are
-// configured so it can show/hide the toggle accordingly.
-app.get('/api/status', (req, res) => {
-  res.json({
-    anthropic: !!process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'your-anthropic-key-here',
-    openai:    !!process.env.OPENAI_API_KEY    && process.env.OPENAI_API_KEY    !== 'your-openai-key-here',
+// Export libraries, served from node_modules and loaded by the page
+// only when someone downloads a PDF or Word file.
+const VENDOR = {
+  'pdfmake.min.js': 'pdfmake/build/pdfmake.min.js',
+  'vfs_fonts.js':   'pdfmake/build/vfs_fonts.js',
+  'docx.js':        'docx/dist/index.iife.js',
+};
+app.get('/vendor/:file', (req, res, next) => {
+  const rel = VENDOR[req.params.file];
+  if (!rel) return next();
+  res.sendFile(path.join(__dirname, 'node_modules', rel), { maxAge: '7d' });
+});
+
+// ── Which providers are configured, and their models ─────────
+app.get('/api/providers', (req, res) => {
+  res.json(describeProviders());
+});
+
+// ── Streaming responses ──────────────────────────────────────
+//  Both endpoints answer with newline-delimited JSON events:
+//    {"type":"start","provider","model"}
+//    {"type":"text","text":"..."}            (many)
+//    {"type":"done","stopReason","usage"}
+//    {"type":"error","message"}               (instead of done)
+
+/** Shared checks; sends the error response and returns null if they fail. */
+function prepare(req, res) {
+  const provider = req.body?.provider;
+  if (!Object.hasOwn(CATALOG, provider)) {
+    res.status(400).json({ error: 'Choose Claude or OpenAI.' });
+    return null;
+  }
+  if (!isConfigured(provider)) {
+    const { label, envKey } = CATALOG[provider];
+    res.status(503).json({ error: `${label} isn't set up. Add ${envKey} to .env and restart the server.` });
+    return null;
+  }
+  try {
+    return { provider, model: findModel(provider, req.body?.model), profile: validateProfile(req.body?.profile) };
+  } catch (err) {
+    if (err instanceof ProfileError) { res.status(400).json({ error: err.message }); return null; }
+    throw err;
+  }
+}
+
+async function stream(res, { provider, model, system, messages }) {
+  // Stop the upstream request if the browser disconnects or presses Stop.
+  const abort = new AbortController();
+  res.on('close', () => { if (!res.writableFinished) abort.abort(); });
+
+  res.status(200).set({
+    'Content-Type': 'application/x-ndjson; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders();
+  const send = event => res.write(JSON.stringify(event) + '\n');
+  send({ type: 'start', provider, model: { id: model.id, label: model.label } });
+
+  try {
+    for await (const event of adapters[provider]({ model, system, messages, signal: abort.signal })) send(event);
+  } catch (err) {
+    if (abort.signal.aborted) return;        // client went away; nothing to report
+    console.error(`[${provider}/${model.id}]`, err?.status ?? '', err?.message ?? err);
+    send({ type: 'error', message: explainError(provider, err) });
+  }
+  res.end();
+}
+
+// Request: { provider, model, profile: { score, goal, cards[] } }
+app.post('/api/plan', async (req, res) => {
+  const ctx = prepare(req, res);
+  if (!ctx) return;
+  await stream(res, {
+    ...ctx,
+    system: SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: buildPrompt(ctx.profile) }],
   });
 });
 
-// ── Anthropic proxy ──────────────────────────────────────────
-app.post('/api/analyze/anthropic', async (req, res) => {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey || apiKey === 'your-anthropic-key-here') {
-    return res.status(500).json({ error: 'ANTHROPIC_API_KEY is not set in .env' });
-  }
-
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
-
+// Request: { provider, model, profile, plan?, messages: [{ role, content }] }
+app.post('/api/chat', async (req, res) => {
+  const ctx = prepare(req, res);
+  if (!ctx) return;
+  let chat;
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type':      'application/json',
-        'x-api-key':         apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model:      'claude-sonnet-4-5',
-        max_tokens: 1000,
-        messages:   [{ role: 'user', content: prompt }],
-      }),
-    });
-
-    const data = await response.json();
-    if (!response.ok) {
-      return res.status(response.status).json({ error: data.error?.message || 'Anthropic API error' });
-    }
-
-    const text = data.content?.find(b => b.type === 'text')?.text || '';
-    res.json({ text });
+    chat = validateChat(req.body?.messages, req.body?.plan);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    if (err instanceof ProfileError) return res.status(400).json({ error: err.message });
+    throw err;
   }
-});
-
-// ── OpenAI proxy ─────────────────────────────────────────────
-app.post('/api/analyze/openai', async (req, res) => {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey || apiKey === 'your-openai-key-here') {
-    return res.status(500).json({ error: 'OPENAI_API_KEY is not set in .env' });
-  }
-
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
-
-  try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model:      'gpt-4o',
-        max_tokens: 1000,
-        messages: [
-          { role: 'system', content: 'You are a credit score expert and financial advisor.' },
-          { role: 'user',   content: prompt },
-        ],
-      }),
-    });
-
-    const data = await response.json();
-    if (!response.ok) {
-      return res.status(response.status).json({ error: data.error?.message || 'OpenAI API error' });
-    }
-
-    const text = data.choices?.[0]?.message?.content || '';
-    res.json({ text });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  await stream(res, { ...ctx, system: buildChatSystem(ctx.profile, chat.plan), messages: chat.messages });
 });
 
 // ── Start ────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`\n  Credit Score AI Agent running at http://localhost:${PORT}\n`);
-
-  const hasAnthropic = !!process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'your-anthropic-key-here';
-  const hasOpenAI    = !!process.env.OPENAI_API_KEY    && process.env.OPENAI_API_KEY    !== 'your-openai-key-here';
-  console.log(`  Anthropic : ${hasAnthropic ? '✓ configured' : '✗ not set'}`);
-  console.log(`  OpenAI    : ${hasOpenAI    ? '✓ configured' : '✗ not set'}\n`);
+app.listen(PORT, HOST, err => {
+  if (err) {
+    console.error(`\n  Couldn't start on ${HOST}:${PORT} — ${err.message}\n`);
+    process.exit(1);
+  }
+  console.log(`\n  Credit Score AI Agent running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}\n`);
+  for (const p of Object.values(describeProviders())) {
+    const status = p.configured ? `✓ ${p.models[0].id}` : `✗ add ${p.envKey} to .env`;
+    console.log(`  ${p.label.padEnd(8)}: ${status}`);
+  }
+  console.log('');
 });
