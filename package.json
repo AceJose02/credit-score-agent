@@ -1,16 +1,22 @@
 {
   "name": "credit-score-ai-agent",
-  "version": "1.0.0",
-  "description": "Credit Score AI Agent — Node/Express backend with .env key management",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Credit Score AI Agent: a local web app that turns your credit profile into a plan, using Claude (Anthropic Messages API) or OpenAI (Responses API).",
   "main": "server.js",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node server.js",
-    "dev": "npx nodemon server.js"
+    "dev": "node --watch server.js"
   },
   "dependencies": {
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "node-fetch": "^2.7.0"
+    "@anthropic-ai/sdk": "^0.128.0",
+    "docx": "^9.7.2",
+    "dotenv": "^18.0.4",
+    "express": "^5.2.1",
+    "openai": "^7.23.0",
+    "pdfmake": "^0.3.11"
   }
 }
